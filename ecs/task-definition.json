@@ -1,0 +1,82 @@
+{
+  "family": "pgbouncer",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/pgbouncerTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "pgbouncer",
+      "image": "<AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/<ECR_REPOSITORY>:<IMAGE_TAG>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 6432,
+          "hostPort": 6432,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "RDS_HOST", "value": "<RDS_ENDPOINT>" },
+        { "name": "RDS_PORT", "value": "5432" },
+        { "name": "RDS_DB", "value": "<DATABASE_NAME>" },
+        { "name": "PGBOUNCER_DATABASE_ALIAS", "value": "<DATABASE_NAME>" },
+        { "name": "PGBOUNCER_AUTH_TYPE", "value": "plain" },
+        { "name": "PGBOUNCER_POOL_MODE", "value": "transaction" },
+        { "name": "PGBOUNCER_MAX_CLIENT_CONN", "value": "1000" },
+        { "name": "PGBOUNCER_DEFAULT_POOL_SIZE", "value": "20" },
+        { "name": "PGBOUNCER_MIN_POOL_SIZE", "value": "5" },
+        { "name": "PGBOUNCER_RESERVE_POOL_SIZE", "value": "10" },
+        { "name": "PGBOUNCER_MAX_DB_CONNECTIONS", "value": "80" },
+        { "name": "PGBOUNCER_MAX_USER_CONNECTIONS", "value": "500" },
+        { "name": "PGBOUNCER_ADMIN_USERS", "value": "<APP_DB_USER>" },
+        { "name": "PGBOUNCER_STATS_USERS", "value": "<APP_DB_USER>" }
+      ],
+      "secrets": [
+        {
+          "name": "RDS_USER",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:pgbouncer/rds-user"
+        },
+        {
+          "name": "RDS_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:pgbouncer/rds-password"
+        },
+        {
+          "name": "APP_DB_USER",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:pgbouncer/app-db-user"
+        },
+        {
+          "name": "APP_DB_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:pgbouncer/app-db-password"
+        }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "/usr/local/bin/pgbouncer-healthcheck"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 20
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/pgbouncer",
+          "awslogs-region": "<AWS_REGION>",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "linuxParameters": {
+        "initProcessEnabled": true
+      },
+      "ulimits": [
+        {
+          "name": "nofile",
+          "softLimit": 65535,
+          "hardLimit": 65535
+        }
+      ]
+    }
+  ]
+}

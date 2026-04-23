@@ -20,6 +20,14 @@ make logs-pgbouncer
 make logs-postgres
 ```
 
+### Deploy to ECS:
+```bash
+# See ECS container, task, service, and Azure Pipelines templates
+ls ecs
+```
+
+The production-oriented deployment assets live in [`ecs/`](ecs/README.md), and the Azure Pipelines definition is [`azure-pipelines.yml`](azure-pipelines.yml).
+
 ---
 
 ## 🏗️ Architecture Overview

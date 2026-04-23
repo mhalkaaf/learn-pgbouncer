@@ -1,0 +1,120 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  awsRegion: "ap-southeast-1"
+  awsAccountId: "<AWS_ACCOUNT_ID>"
+  ecrRepository: "pgbouncer"
+  ecsClusterName: "<ECS_CLUSTER_NAME>"
+  ecsServiceName: "pgbouncer"
+  rdsEndpoint: "<RDS_ENDPOINT>"
+  databaseName: "<DATABASE_NAME>"
+  appDbUser: "<APP_DB_USER>"
+  imageTag: "$(Build.SourceVersion)"
+  imageUri: "$(awsAccountId).dkr.ecr.$(awsRegion).amazonaws.com/$(ecrRepository):$(imageTag)"
+
+stages:
+  - stage: Build
+    displayName: Build and Push Image
+    jobs:
+      - job: Docker
+        displayName: Build PgBouncer Image
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+
+          - script: |
+              set -euo pipefail
+              docker build -f ecs/Dockerfile -t "$(ecrRepository):validation" ecs
+            displayName: Build Docker Image
+
+          - task: AWSShellScript@1
+            displayName: Login to ECR
+            condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+            inputs:
+              awsCredentials: "aws-service-connection"
+              regionName: "$(awsRegion)"
+              scriptType: inline
+              inlineScript: |
+                set -euo pipefail
+                aws ecr describe-repositories --repository-names "$(ecrRepository)" >/dev/null 2>&1 \
+                  || aws ecr create-repository --repository-name "$(ecrRepository)" >/dev/null
+                aws ecr get-login-password --region "$(awsRegion)" \
+                  | docker login --username AWS --password-stdin "$(awsAccountId).dkr.ecr.$(awsRegion).amazonaws.com"
+
+          - script: |
+              set -euo pipefail
+              docker tag "$(ecrRepository):validation" "$(imageUri)"
+              docker push "$(imageUri)"
+            displayName: Push Docker Image
+            condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+
+  - stage: Deploy
+    displayName: Deploy to ECS
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: ECS
+        displayName: Register Task Definition and Update Service
+        environment: production
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: AWSShellScript@1
+                  displayName: Render and Register Task Definition
+                  inputs:
+                    awsCredentials: "aws-service-connection"
+                    regionName: "$(awsRegion)"
+                    scriptType: inline
+                    inlineScript: |
+                      set -euo pipefail
+
+                      sed \
+                        -e "s|<AWS_ACCOUNT_ID>|$(awsAccountId)|g" \
+                        -e "s|<AWS_REGION>|$(awsRegion)|g" \
+                        -e "s|<ECR_REPOSITORY>|$(ecrRepository)|g" \
+                        -e "s|<IMAGE_TAG>|$(imageTag)|g" \
+                        -e "s|<RDS_ENDPOINT>|$(rdsEndpoint)|g" \
+                        -e "s|<DATABASE_NAME>|$(databaseName)|g" \
+                        -e "s|<APP_DB_USER>|$(appDbUser)|g" \
+                        ecs/task-definition.json > task-definition.rendered.json
+
+                      task_definition_arn="$(aws ecs register-task-definition \
+                        --cli-input-json file://task-definition.rendered.json \
+                        --query 'taskDefinition.taskDefinitionArn' \
+                        --output text)"
+
+                      echo "Registered task definition: ${task_definition_arn}"
+                      echo "##vso[task.setvariable variable=taskDefinitionArn]${task_definition_arn}"
+
+                - task: AWSShellScript@1
+                  displayName: Update ECS Service
+                  inputs:
+                    awsCredentials: "aws-service-connection"
+                    regionName: "$(awsRegion)"
+                    scriptType: inline
+                    inlineScript: |
+                      set -euo pipefail
+
+                      aws ecs update-service \
+                        --cluster "$(ecsClusterName)" \
+                        --service "$(ecsServiceName)" \
+                        --task-definition "$(taskDefinitionArn)" \
+                        --force-new-deployment
+
+                      aws ecs wait services-stable \
+                        --cluster "$(ecsClusterName)" \
+                        --services "$(ecsServiceName)"

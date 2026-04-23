@@ -1,0 +1,28 @@
+{
+  "cluster": "<ECS_CLUSTER_NAME>",
+  "serviceName": "pgbouncer",
+  "taskDefinition": "pgbouncer",
+  "desiredCount": 2,
+  "launchType": "FARGATE",
+  "platformVersion": "LATEST",
+  "deploymentConfiguration": {
+    "minimumHealthyPercent": 100,
+    "maximumPercent": 200
+  },
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": ["<PRIVATE_SUBNET_ID_A>", "<PRIVATE_SUBNET_ID_B>"],
+      "securityGroups": ["<PGBOUNCER_SECURITY_GROUP_ID>"],
+      "assignPublicIp": "DISABLED"
+    }
+  },
+  "loadBalancers": [
+    {
+      "targetGroupArn": "<INTERNAL_NLB_TARGET_GROUP_ARN>",
+      "containerName": "pgbouncer",
+      "containerPort": 6432
+    }
+  ],
+  "healthCheckGracePeriodSeconds": 30,
+  "enableExecuteCommand": true
+}
